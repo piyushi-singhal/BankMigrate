@@ -1,98 +1,110 @@
-# System Architecture
+# BankMigrate — System Architecture Specification
 
-## Overview
-BankMigrate is an enterprise banking data migration platform designed to simulate moving inconsistent legacy banking data into a clean, normalized target system. The architecture decouples orchestration, data processing, and persistence into clear technical layers:
+## 1. Overview
+BankMigrate is an enterprise banking data migration platform designed to extract, validate, transform, load, reconcile, and audit legacy banking data from `BankMigrate_Legacy` into a clean, normalized SQL Server target schema `BankMigrate_Target`.
 
-1. **Orchestration & REST Layer:** ASP.NET Core Web API (.NET 8 C#)
-2. **Data Processing Engine:** Python 3.x with Pandas, SQLAlchemy, and T-SQL Stored Procedures
-3. **Relational Storage:** Microsoft SQL Server hosting `BankMigrate_Legacy` and `BankMigrate_Target`
+The system employs a dual-layer architecture combining high-performance Python data engineering (`migration_engine`) with database-native T-SQL stored procedures, RESTful ASP.NET Core API orchestration, and background scheduling.
 
 ---
 
-## 4.1 End-to-End Data Flow
-
-The data pipeline processes legacy data sequentially through seven pipeline stages:
-
-```mermaid
-flowchart TD
-    subgraph LegacyStorage ["Legacy Storage"]
-        LDB[("Legacy SQL Server Database\n(BankMigrate_Legacy)")]
-    end
-
-    subgraph Pipeline ["Python Migration Engine"]
-        EXT["1. Data Extraction\n(SQL queries to DataFrames)"]
-        PROF["2. Data Profiling\n(Row, Null, Duplicate Counts)"]
-        VAL{"3. Data Validation\n(Rule Engine Check)"}
-        TRANS["4. Transformation\n(Casing, Formatting, Cleaning)"]
-        LOAD["5. Target Load\n(Inserts to Target Tables)"]
-        RECON["6. Reconciliation\n(Count & Dollar Amount Math)"]
-        REP["7. Migration Report\n(Run Status & Summaries)"]
-    end
-
-    subgraph TargetStorage ["Target & Audit Storage"]
-        EX_STORE[("Exception Store\n(MigrationExceptions)")]
-        TDB[("Target Database\n(BankMigrate_Target)")]
-        AUDIT[("Audit Log\n(MigrationAudit & MigrationRuns)")]
-    end
-
-    LDB --> EXT
-    EXT --> PROF
-    PROF --> VAL
-    VAL -->|Valid Records| TRANS
-    VAL -->|Invalid Records| EX_STORE
-    TRANS --> LOAD
-    LOAD --> TDB
-    TDB --> RECON
-    EX_STORE --> RECON
-    RECON --> REP
-    REP --> AUDIT
-```
-
----
-
-## 4.2 Component / Service Architecture
-
-The system decouples RESTful HTTP management from core batch migration processing:
+## 2. Component Architecture
 
 ```mermaid
 graph TD
-    subgraph Client ["Management Client / Consumer"]
-        HTTP_REQ["HTTP REST Requests\n(cURL, Postman, Web Apps)"]
+    subgraph Source Layer
+        LegacyDB[BankMigrate_Legacy Database]
     end
 
-    subgraph ApiLayer ["ASP.NET Core API (.NET 8)"]
-        CTRL["Migration Controller"]
-        SVC["Migration Service"]
-        REP_SVC["Reporting Service"]
+    subgraph Core Processing Engine (Python)
+        Ext[Extractor Module]
+        Prof[Profiler Module]
+        Val[Validator Module & Rule Catalog]
+        Trans[Transformer Module]
+        Load[Target Loader]
+        Recon[Reconciler Module]
+        Audit[Audit & Run Logger]
+        Exc[Exception Handler]
     end
 
-    subgraph EngineLayer ["Python Migration Engine"]
-        SUB_PROC["CLI Engine Invoker\n(main.py)"]
-        MODULES["Engine Modules:\n• extraction/\n• profiling/\n• validation/\n• transformation/\n• loading/\n• reconciliation/\n• exceptions/\n• audit/"]
+    subgraph Database Layer (SQL Server)
+        TargetDB[BankMigrate_Target Database]
+        RunsTab[(MigrationRuns)]
+        ExTab[(MigrationExceptions)]
+        AuditTab[(MigrationAudit)]
+        SPs[T-SQL Stored Procedures]
     end
 
-    subgraph SqlLayer ["Microsoft SQL Server Engine"]
-        SP_LAYER["T-SQL Stored Procedures:\n• sp_validate_customers\n• sp_validate_accounts\n• sp_validate_transactions\n• sp_detect_duplicates\n• sp_reconcile_migration\n• sp_generate_migration_summary"]
-        
-        DB_LEGACY[("BankMigrate_Legacy\n• Customers_Legacy\n• Accounts_Legacy\n• Transactions_Legacy\n• Loans_Legacy\n• Beneficiaries_Legacy\n• Addresses_Legacy")]
-        
-        DB_TARGET[("BankMigrate_Target\n• Customers\n• Accounts\n• Transactions\n• Loans\n• Beneficiaries\n• Addresses\n• MigrationRuns\n• MigrationExceptions\n• MigrationAudit")]
+    subgraph Orchestration & Control Plane
+        API[ASP.NET Core REST API]
+        Sched[APScheduler Background Jobs]
     end
 
-    HTTP_REQ --> CTRL
-    CTRL --> SVC
-    CTRL --> REP_SVC
-    SVC --> SUB_PROC
-    SUB_PROC --> MODULES
-    MODULES --> SP_LAYER
-    MODULES --> DB_LEGACY
-    MODULES --> DB_TARGET
-    REP_SVC --> DB_TARGET
+    LegacyDB --> Ext
+    Ext --> Prof
+    Prof --> Val
+    Val -- Rejected Records --> Exc
+    Exc --> ExTab
+    Val -- Valid Records --> Trans
+    Trans --> Load
+    Load --> TargetDB
+    Load --> AuditTab
+    Audit --> RunsTab
+    TargetDB --> SPs
+    SPs --> Recon
+    API --> Ext
+    API --> RunsTab
+    API --> ExTab
+    Sched --> Ext
 ```
 
 ---
 
-## Architecture Rationale
-- **ASP.NET Core REST API:** Exposes endpoints to start, list, inspect, and retry migration runs without embedding heavyweight data processing inside web server threads.
-- **Python Engine:** Utilizes Pandas for high-speed in-memory cleaning, transformation, and validation rule enforcement across large datasets.
-- **T-SQL Stored Procedures:** Leverages SQL Server's native engine for set-based validation, window-function duplicate detection (`ROW_NUMBER()`), and atomic audit transactions.
+## 3. Data Processing Pipeline Stages
+
+1. **Extraction Stage:** Connects to `BankMigrate_Legacy` via SQLAlchemy and PyMSSQL, extracting raw unconstrained legacy tables into in-memory Pandas DataFrames.
+2. **Profiling Stage:** Computes total row counts, column-level null counts (`df.isnull().sum()`), and duplicate row counts per entity before processing.
+3. **Validation Stage:** Enforces the Section 11 rule catalog (`CUSTOMER_*`, `ACCOUNT_*`, `TXN_*`). Valid records are forwarded to transformation; invalid records are isolated.
+4. **Exception Handling Stage:** Writes rejected records to `MigrationExceptions` with rule ID, severity, error message, and JSON raw data snapshot.
+5. **Transformation Stage:** Normalizes valid data to target specifications (Title Case, ISO `YYYY-MM-DD` dates, stripped phone digits, uppercased enums, 2-decimal rounding).
+6. **Bulk Loading Stage:** Bulk inserts transformed DataFrames into `BankMigrate_Target` in strict foreign key dependency order (`Addresses` $\rightarrow$ `Customers` $\rightarrow$ `Accounts` $\rightarrow$ `Transactions` $\rightarrow$ `Loans` $\rightarrow$ `Beneficiaries`).
+7. **Reconciliation Stage:** Verifies count math ($\text{Source} = \text{Valid} + \text{Rejected}$) and calls T-SQL stored procedure `sp_reconcile_migration` to verify monetary balance integrity ($\text{Source Txn Amount} = \text{Target Txn Amount} + \text{Rejected Txn Amount}$).
+8. **Audit & Run Tracking Stage:** Updates `MigrationRuns` status (`COMPLETED`, `COMPLETED_WITH_EXCEPTIONS`, `FAILED`) and records atomic DML events in `MigrationAudit`.
+
+---
+
+## 4. Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Operator as Operator / API Client
+    participant API as ASP.NET Core API
+    participant Pipeline as Python Pipeline Engine
+    participant Legacy as BankMigrate_Legacy DB
+    participant Target as BankMigrate_Target DB
+    participant SP as T-SQL Stored Procedures
+
+    Operator->>API: POST /api/migrations
+    API->>Pipeline: Trigger run_pipeline(run_id)
+    Pipeline->>Target: INSERT INTO MigrationRuns (status='IN_PROGRESS')
+    Pipeline->>Legacy: SELECT * FROM Legacy Tables
+    Legacy-->>Pipeline: Raw Legacy DataFrames
+    Pipeline->>Pipeline: Validate Rule Catalog
+    Pipeline->>Target: INSERT INTO MigrationExceptions (Rejected Records)
+    Pipeline->>Pipeline: Transform Valid DataFrames
+    Pipeline->>Target: BULK INSERT (Addresses -> Customers -> Accounts -> Txns)
+    Pipeline->>Target: INSERT INTO MigrationAudit (INSERT / REJECT Events)
+    Pipeline->>SP: EXEC sp_reconcile_migration(@RunId)
+    SP-->>Pipeline: Monetary Balance Status (BALANCED)
+    Pipeline->>Target: UPDATE MigrationRuns (status='COMPLETED_WITH_EXCEPTIONS')
+    Pipeline-->>API: Pipeline Result JSON
+    API-->>Operator: 200 OK (Run Details)
+```
+
+---
+
+## 5. Technology Stack Decisions
+- **Database Engine:** Microsoft SQL Server (Azure SQL Edge container) for enterprise relational modeling, ACID compliance, and stored procedure support.
+- **Python Engine:** Python 3.14.5 + Pandas + PyMSSQL + SQLAlchemy for vectorised data manipulation and database connectivity.
+- **API Orchestration:** .NET 8.0 C# (ASP.NET Core Web API) + Dapper for high-performance RESTful management endpoints.
+- **Scheduler:** APScheduler for in-process cron and interval recurring batch execution.
