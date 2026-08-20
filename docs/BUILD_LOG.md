@@ -295,13 +295,9 @@
 
 ### 3. How It Was Built
 - **Transformation Algorithm Execution (`transformer.py`):**
-  - Example: `df["full_name"] = df["customer_name"].astype(str).str.strip().str.title()`
-  - Example: `df["phone_number"] = df["phone"].apply(normalize_phone)`
-  - Example: `df["email"] = df["email"].astype(str).str.strip().str.lower()`
-  - Example: `df["account_type"] = df["account_type"].astype(str).str.strip().str.upper()`
+  Implemented Title Case, phone digit normalization, ISO date formatting, enumeration uppercasing, and 2-decimal monetary rounding.
 - **Verification Execution Output (`scripts/run_milestone_8.py`):**
-  - Transformed 5 Addresses, 7 Customers, 6 Accounts, 7 Transactions, 2 Loans, 2 Beneficiaries.
-  - Confirmed `' john smith '` $\rightarrow$ `'John Smith'`, `'+91-98765-43210'` $\rightarrow$ `'919876543210'`, `'1985-05-15'` $\rightarrow$ `1985-05-15`.
+  Transformed 5 Addresses, 7 Customers, 6 Accounts, 7 Transactions, 2 Loans, 2 Beneficiaries cleanly.
 
 ---
 
@@ -321,13 +317,13 @@
 ### 1. What Was Built
 - **Target Loader Module (`migration_engine/loading/loader.py`):** Built bulk insertion loader (`load_transformed_data`, `load_entity`) persisting clean, transformed DataFrames directly into `BankMigrate_Target` database using SQLAlchemy engine `to_sql`.
 - **Foreign Key Dependency Order Control:** Enforced strict relational loading sequence: `Addresses` $\rightarrow$ `Customers` $\rightarrow$ `Accounts` $\rightarrow$ `Transactions` $\rightarrow$ `Loans` $\rightarrow$ `Beneficiaries`.
-- **Target Table Truncation (`clear_target_tables`):** Added capability to clear target tables in reverse foreign key order (`Beneficiaries` $\rightarrow$ `Loans` $\rightarrow$ `Transactions` $\rightarrow$ `Accounts` $\rightarrow$ `Customers` $\rightarrow$ `Addresses`) before fresh pipeline execution.
+- **Target Table Truncation (`clear_target_tables`):** Added capability to clear target tables in reverse foreign key order before fresh pipeline execution.
 - **Milestone 9 Verification Runner:** Created [`scripts/run_milestone_9.py`](file:///Users/piyushisinghal/Downloads/BankMigrate/scripts/run_milestone_9.py) executing extraction $\rightarrow$ validation $\rightarrow$ transformation $\rightarrow$ target loading, followed by direct T-SQL row count verification queries against SQL Server.
 
 ---
 
 ### 2. Why It Was Built This Way
-- **Foreign Key Safe Execution:** Ordering target loads by entity dependencies prevents SQL Server foreign key violation errors (`FK__Customers__address_id`, `FK__Accounts__customer_id`, `FK__Transactions__account_id`).
+- **Foreign Key Safe Execution:** Ordering target loads by entity dependencies prevents SQL Server foreign key violation errors.
 - **Transactional Bulk Appending:** Utilizing SQLAlchemy `to_sql(..., if_exists='append', index=False)` provides high-throughput batch insertion into target tables while respecting target database constraints.
 
 ---
@@ -336,14 +332,7 @@
 - **Relational Loading Implementation (`loader.py`):**
   Loops through `LOAD_ORDER` list, calling `df.to_sql(name=table_name, con=engine, if_exists="append", index=False)`.
 - **SQL Server Verification (`scripts/run_milestone_9.py`):**
-  Queried `BankMigrate_Target` via PyMSSQL cursor:
-  - `Addresses`: 5 rows loaded (✅ MATCH)
-  - `Customers`: 7 rows loaded (✅ MATCH)
-  - `Accounts`: 6 rows loaded (✅ MATCH)
-  - `Transactions`: 7 rows loaded (✅ MATCH)
-  - `Loans`: 2 rows loaded (✅ MATCH)
-  - `Beneficiaries`: 2 rows loaded (✅ MATCH)
-  - **Total:** 29 clean rows loaded into target database.
+  Queried `BankMigrate_Target` via PyMSSQL cursor: 29 clean rows loaded into target database.
 
 ---
 
@@ -353,3 +342,144 @@
 - **ORM / DB Engine:** SQLAlchemy 2.0.52
 - **Database Driver:** PyMSSQL 2.3.13
 - **Data Engineering:** Pandas 3.0.5
+
+---
+
+## Milestone 10: Build T-SQL Stored Procedure Layer
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **Enterprise T-SQL Stored Procedure Library:** Implemented 6 core database stored procedures in `BankMigrate_Target` (defined in `scripts/sql/04_create_stored_procedures.sql`):
+  1. `sp_detect_duplicates`: Performs window-function duplicate detection (`ROW_NUMBER() OVER (PARTITION BY ...)`).
+  2. `sp_validate_customers`: Runs `CUSTOMER_*` validation checks using CTEs, temp tables (`#CustExceptions`), and `TRY...CATCH` blocks.
+  3. `sp_validate_accounts`: Runs `ACCOUNT_*` validation checks against staged legacy data.
+  4. `sp_validate_transactions`: Runs `TXN_*` validation checks.
+  5. `sp_reconcile_migration`: Compares source vs target record counts and calculates monetary transaction totals (`SourceTxnSum = TargetTxnSum + RejectedTxnSum`).
+  6. `sp_generate_migration_summary`: Produces run-level summary report joining `MigrationRuns`, `MigrationExceptions`, and `MigrationAudit`.
+- **Deployment & Verification Script:** Created `scripts/create_stored_procedures.py` to deploy and verify all 6 procedures in SQL Server.
+
+---
+
+### 2. Why It Was Built This Way
+- **Database-Native Set Processing:** Implementing validation and duplicate detection in T-SQL stored procedures demonstrates advanced database capabilities (CTEs, Window Functions, Temp Tables, `TRY...CATCH`, explicit `BEGIN TRAN / COMMIT / ROLLBACK` transactions).
+- **Dual Layer Architecture:** Demonstrates both Python application-level validation and SQL Server database-level stored procedure validation, simulating enterprise banking architectures where T-SQL procedures enforce data governance directly inside the database engine.
+
+---
+
+### 3. How It Was Built
+- **T-SQL Scripting (`scripts/sql/04_create_stored_procedures.sql`):**
+  - Window Function Duplicate Detection:
+    ```sql
+    WITH CustomerDuplicates AS (
+        SELECT customer_id, customer_name, dob,
+               ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(customer_name)), dob ORDER BY customer_id) AS row_num
+        FROM BankMigrate_Legacy.dbo.Customers_Legacy
+        WHERE customer_id IS NOT NULL
+    )
+    SELECT * FROM CustomerDuplicates WHERE row_num > 1;
+    ```
+  - Temp Tables & JSON Formatting: Used `#CustExceptions` and `FOR JSON PATH, WITHOUT_ARRAY_WRAPPER` to snapshot offending rows into `MigrationExceptions.source_data`.
+- **Deployment Verification (`scripts/create_stored_procedures.py`):**
+  Queried `INFORMATION_SCHEMA.ROUTINES`: All 6 stored procedures verified as DEPLOYED.
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Database Engine:** Microsoft SQL Server (Azure SQL Edge container `mcr.microsoft.com/azure-sql-edge:latest`)
+- **SQL Dialect:** T-SQL (Window Functions, CTEs, Temp Tables, `TRY...CATCH`, Transactions, JSON Path)
+- **Database Driver:** PyMSSQL 2.3.13
+- **Language / Runtime:** Python 3.14.5
+
+---
+
+## Milestone 11: Implement Exception Store & Exception Handling Layer
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **Exception Handler Module (`migration_engine/exceptions/handler.py`):** Developed `record_exceptions(run_id, exceptions_list)` and `get_run_exceptions(run_id)` connecting to `BankMigrate_Target`.
+- **Exception Store Persistence:** Writes every rejected record into `MigrationExceptions` table, persisting:
+  - `run_id`: Unique migration run identifier (e.g. `RUN-TEST-M10-M12`).
+  - `entity_type`: Affected entity (`Customer`, `Account`, `Transaction`).
+  - `record_id`: Natural record ID of offending row.
+  - `rule_id`: Failed Rule ID (`CUSTOMER_001`, `CUSTOMER_002`, `CUSTOMER_004`, `CUSTOMER_005`, `ACCOUNT_002`, `ACCOUNT_004`, `TXN_002`, `TXN_003`, `TXN_005`).
+  - `severity`: Severity classification (`ERROR`, `WARNING`).
+  - `error_message`: Human-readable explanation.
+  - `source_data`: Full JSON snapshot of the original offending legacy record.
+  - `status`: Initial exception status set to `'OPEN'`.
+- **Milestone 11 Verification Runner:** Integrated into `scripts/run_milestones_10_11_12.py`.
+
+---
+
+### 2. Why It Was Built This Way
+- **Zero Silent Data Loss:** Isolating rejected records into a structured SQL exception store ensures that bad legacy data never silently disappears or crashes the pipeline. Operators can inspect `MigrationExceptions` via REST APIs to resolve or correct exceptions.
+- **Auditability & Traceability:** Preserving `source_data` as a JSON string inside `MigrationExceptions` provides an immutable audit trail of the original raw record as it existed in the legacy database at the moment of rejection.
+
+---
+
+### 3. How It Was Built
+- **Parameterized SQL Persistence (`handler.py`):**
+  Uses PyMSSQL cursor executing parameterized bulk inserts:
+  `INSERT INTO MigrationExceptions (run_id, entity_type, record_id, rule_id, severity, error_message, source_data, status) VALUES (%s, %s, %s, %s, %s, %s, %s, 'OPEN')`
+- **Verification Execution Output (`scripts/run_milestones_10_11_12.py`):**
+  Persisted and queried 9 exception records from SQL Server `MigrationExceptions` table for run `RUN-TEST-M10-M12`.
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Database Engine:** Microsoft SQL Server
+- **Language / Runtime:** Python 3.14.5
+- **Database Driver:** PyMSSQL 2.3.13
+- **Data Serialization:** Python `json`
+
+---
+
+## Milestone 12: Implement Automated Reconciliation Engine
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **Reconciliation Engine (`migration_engine/reconciliation/reconciler.py`):** Built `reconcile_run(run_id, summary_counts)` executing automated mathematical and database reconciliation checks for every migration run.
+- **Record Count Reconciliation Math:**
+  Verifies:
+  $$\text{Source Records} = \text{Validated Records} + \text{Rejected Records}$$
+  $$\text{Validated Records} = \text{Loaded Records}$$
+- **Monetary Amount Reconciliation:** Invokes T-SQL stored procedure `sp_reconcile_migration` in SQL Server to compute monetary balance across financial transaction tables:
+  $$\text{Source Transaction Amount} = \text{Target Transaction Amount} + \text{Rejected Transaction Amount}$$
+- **Structured Reconciliation Report:** Returns structured dictionary reporting count match boolean, monetary breakdown, and status (`BALANCED` or `DISCREPANCY_DETECTED`).
+- **Milestone 12 Verification Runner:** Integrated into [`scripts/run_milestones_10_11_12.py`](file:///Users/piyushisinghal/Downloads/BankMigrate/scripts/run_milestones_10_11_12.py).
+
+---
+
+### 2. Why It Was Built This Way
+- **Automated Verification over Manual Spot-Checks:** Running automated mathematical reconciliation at the end of every migration run proves that no records or dollar amounts were lost or unaccounted for during processing.
+- **Financial Audit Rigor:** In banking data migrations, reconciling dollar amounts (Source Txn Sum = Target Txn Sum + Rejected Txn Sum) is mandatory to guarantee financial balance integrity across legacy and core banking systems.
+
+---
+
+### 3. How It Was Built
+- **Reconciliation Algorithm (`reconciler.py`):**
+  - Evaluates `count_match = (source == (valid + rejected)) and (valid == loaded)`.
+  - Calls `cursor.callproc("sp_reconcile_migration", (run_id,))`.
+- **Verification Execution Output (`scripts/run_milestones_10_11_12.py`):**
+  - Source Records: 38
+  - Validated Records: 29
+  - Rejected Records: 9
+  - Loaded Records: 29
+  - Count Math Check: $38 = 29 + 9 \rightarrow$ `True` ✅
+  - Reconciliation Status: `BALANCED` ✅
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Database Engine:** Microsoft SQL Server (Azure SQL Edge container `mcr.microsoft.com/azure-sql-edge:latest`)
+- **SQL Dialect:** T-SQL Stored Procedure `sp_reconcile_migration`
+- **Language / Runtime:** Python 3.14.5
+- **Database Driver:** PyMSSQL 2.3.13
