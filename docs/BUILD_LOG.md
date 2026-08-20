@@ -146,20 +146,14 @@
 
 ### 2. Why It Was Built This Way
 - **Architectural Traceability:** Formalizing the mapping document as a version-controlled Markdown asset under `docs/` guarantees that migration transformation code in subsequent milestones (Milestones 7 & 8) directly implements documented specifications rather than implicit assumptions.
-- **Declarative Cleaning Contracts:** Defining transformation algorithms prior to coding Python pipeline modules ensures predictable validation logic:
-  - Casing rules (Title Case for names, Uppercase for enumerations like `account_type` and `status`, Lowercase for emails).
-  - Phone normalization (stripping non-digits to produce standard 10-12 digit numbers).
-  - Multi-format date parsing (converting legacy string representations like `15/05/1985` or `1985-05-15` into standard SQL `DATE`).
+- **Declarative Cleaning Contracts:** Defining transformation algorithms prior to coding Python pipeline modules ensures predictable validation logic.
 
 ---
 
 ### 3. How It Was Built
 - **Markdown Specification (`docs/data-mapping.md`):**
-  Formatted tables linking legacy column names $\rightarrow$ target column names $\rightarrow$ target SQL data types $\rightarrow$ transformation algorithms $\rightarrow$ input/output transformation examples:
-  - Example: Legacy `' john smith '` $\rightarrow$ Target `'John Smith'` (Title Case, trim spaces).
-  - Example: Legacy `'+91-98765-43210'` $\rightarrow$ Target `'9876543210'` (Phone digit normalization).
-  - Example: Legacy `'12/03/1999'` $\rightarrow$ Target `1999-03-12` (ISO date conversion).
-- **Mermaid Diagram Versioning:** Embedded renderable Mermaid `erDiagram` syntax for both legacy and target schemas, explicitly documenting intentional dirty foreign key references (e.g. `A999999` in `Transactions_Legacy`).
+  Formatted tables linking legacy column names $\rightarrow$ target column names $\rightarrow$ target SQL data types $\rightarrow$ transformation algorithms $\rightarrow$ input/output transformation examples.
+- **Mermaid Diagram Versioning:** Embedded renderable Mermaid `erDiagram` syntax for both legacy and target schemas.
 
 ---
 
@@ -167,3 +161,57 @@
 - **Documentation Standard:** GitHub Flavored Markdown (GFM)
 - **Diagramming Engine:** Mermaid JS (`erDiagram`)
 - **Version Control:** Git version-controlled asset in `docs/data-mapping.md`
+
+---
+
+## Milestone 5: Build Python Migration Engine Package Skeleton
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **Modular Package Architecture:** Architected and created the complete `migration_engine/` Python package structured into 9 decoupled submodules:
+  1. `migration_engine/config/`: Environment configuration & SQLAlchemy / PyMSSQL connection factories.
+  2. `migration_engine/extraction/`: Legacy database extraction engine reading SQL tables into Pandas DataFrames.
+  3. `migration_engine/profiling/`: Data profiler calculating total row counts, null counts, and duplicate counts.
+  4. `migration_engine/validation/`: Validation rule catalog (`rules.py`) and validator engine (`validator.py`).
+  5. `migration_engine/transformation/`: Cleaning engine applying Title Case, phone digit normalization, and ISO date formatting (`transformer.py`).
+  6. `migration_engine/exceptions/`: Exception store handler writing rejected records to `MigrationExceptions` (`handler.py`).
+  7. `migration_engine/loading/`: Bulk target loader inserting DataFrames into `BankMigrate_Target` in foreign key order (`loader.py`).
+  8. `migration_engine/reconciliation/`: Mathematical reconciler checking count and monetary balance (`reconciler.py`).
+  9. `migration_engine/audit/`: Audit logger recording operational events in `MigrationAudit` and tracking run states in `MigrationRuns` (`logger.py`).
+- **Pipeline Orchestrator:** Developed `migration_engine/pipeline.py` implementing `run_pipeline(run_id)` executing the linear pipeline sequence: `extract()` $\rightarrow$ `profile()` $\rightarrow$ `validate()` $\rightarrow$ `transform()` $\rightarrow$ `load()` $\rightarrow$ `reconcile()` $\rightarrow$ `report()`.
+- **Skeleton Import Test Suite:** Created `scripts/test_engine_skeleton.py` to verify independent importability and execution of all 9 submodules.
+
+---
+
+### 2. Why It Was Built This Way
+- **Package Decoupling over Script Monoliths:** Building a structured Python package (`migration_engine/`) rather than a single monolithic script guarantees that each phase of the migration pipeline operates as an independently callable, testable unit.
+- **Strict Linear Pipeline Execution:** Orchestrating pipeline execution through `pipeline.py` ensures that extraction occurs before validation, validation isolates invalid records before transformation, and loading occurs only for valid records.
+- **Independent Module Callability:** Each module (e.g. `validator.py` or `reconciler.py`) exposes pure functions that take DataFrames or data dictionaries, allowing unit tests in Milestone 19 to mock database connections and test logic in isolation.
+
+---
+
+### 3. How It Was Built
+- **Module Structure (`migration_engine/`):**
+  - `config/settings.py`: Implemented `get_legacy_connection()`, `get_target_connection()`, `get_legacy_engine()`, `get_target_engine()` using PyMSSQL and SQLAlchemy.
+  - `extraction/extractor.py`: Implemented `extract_legacy_data()` returning `dict[str, pd.DataFrame]`.
+  - `profiling/profiler.py`: Implemented `profile_all_tables()` calculating row/null/duplicate statistics.
+  - `validation/validator.py`: Implemented rule-checking functions (`validate_customers`, `validate_accounts`, `validate_transactions`).
+  - `transformation/transformer.py`: Implemented normalization functions (`transform_customers`, `transform_accounts`, `transform_transactions`).
+  - `loading/loader.py`: Implemented `load_transformed_data()` appending to SQL Server target tables via `to_sql`.
+  - `reconciliation/reconciler.py`: Implemented `reconcile_run()` verifying $\text{Source} = \text{Valid} + \text{Rejected}$.
+  - `exceptions/handler.py`: Implemented `record_exceptions()` writing parameterized inserts to `MigrationExceptions`.
+  - `audit/logger.py`: Implemented `create_migration_run()`, `update_migration_run()`, and `log_audit_event()`.
+- **Verification Execution (`scripts/test_engine_skeleton.py`):**
+  Ran import test suite validating all 9 package submodules. Result: `All 9 submodules imported successfully!`.
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Language / Runtime:** Python 3.14.5
+- **Data Science / Engineering:** Pandas 3.0.5
+- **ORM / DB Toolkit:** SQLAlchemy 2.0.52
+- **Database Connectivity:** PyMSSQL 2.3.13
+- **Configuration Management:** `python-dotenv` 1.2.3 reading `.env`
