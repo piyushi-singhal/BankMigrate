@@ -221,17 +221,9 @@
 
 ### 3. How It Was Built
 - **Extraction Mechanism:**
-  ```python
-  def extract_table(table_name: str) -> pd.DataFrame:
-      engine = get_legacy_engine()
-      return pd.read_sql(f"SELECT * FROM {table_name};", con=engine)
-  ```
+  `extract_table(table_name)` reads SQL query output into DataFrame using SQLAlchemy engine.
 - **Profiling Metrics Computation:**
   Calculates `total_rows`, `null_counts = df.isnull().sum().to_dict()`, and `duplicate_rows = int(df.duplicated().sum())`.
-- **Verification Output (`scripts/run_milestone_6.py`):**
-  - Extracted 6 tables total.
-  - `Customers_Legacy`: 11 total rows, 1 null `customer_id` detected.
-  - `Transactions_Legacy`: 10 total rows, 1 duplicate row detected (`TXN-1005`).
 
 ---
 
@@ -251,41 +243,21 @@
 ### 1. What Was Built
 - **Validation Engine (`migration_engine/validation/validator.py`):** Built entity validation functions (`validate_customers`, `validate_accounts`, `validate_transactions`, `validate_all_entities`) enforcing the Section 11 rule catalog across all extracted DataFrames.
 - **Validation Rule Catalog (`migration_engine/validation/rules.py`):** Implemented stable Rule ID catalog mapping rule IDs (`CUSTOMER_001` through `CUSTOMER_005`, `ACCOUNT_001` through `ACCOUNT_004`, `TXN_001` through `TXN_005`) to error severity levels (`ERROR`, `WARNING`) and human-readable descriptions.
-- **Relational Dependency Order Validation:** Structured validation to validate parent entities (`Customers`) first, collecting valid customer IDs to enforce referential integrity checks on dependent entities (`Accounts`), and using valid account IDs for `Transactions` validation.
 - **Milestone 7 Verification Runner:** Created [`scripts/run_milestone_7.py`](file:///Users/piyushisinghal/Downloads/BankMigrate/scripts/run_milestone_7.py) to run extraction and validation against `BankMigrate_Legacy`.
 
 ---
 
 ### 2. Why It Was Built This Way
 - **Stable Rule Traceability:** Assigning immutable Rule IDs (e.g., `CUSTOMER_001`, `ACCOUNT_002`, `TXN_002`) to every failure condition guarantees that rejected records written to `MigrationExceptions` are audit-ready and reportable via REST APIs.
-- **Cascading Referential Integrity Checks:** Validating parent entities before dependent entities ensures that orphan records in child tables (e.g. account `A010` referencing nonexistent customer `C999`, or transaction `TXN-89231` referencing nonexistent account `A999999`) are caught by software validation before reaching SQL Server foreign key constraints.
-- **Data Preservation on Rejection:** When a record fails validation, the record is isolated into the exceptions list alongside a full JSON snapshot of `source_data`, ensuring zero silent data loss.
+- **Cascading Referential Integrity Checks:** Validating parent entities before dependent entities ensures that orphan records in child tables are caught by software validation before reaching SQL Server foreign key constraints.
 
 ---
 
 ### 3. How It Was Built
 - **Rule Enforcement Logic (`validator.py`):**
-  - `CUSTOMER_001`: Checks `pd.isna(cust_id)`. Catches record `Jane Doe`.
-  - `CUSTOMER_002`: Checks natural key `(name.lower(), dob)` and duplicate ID. Catches duplicate record `C019`.
-  - `CUSTOMER_004`: Regex `^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$`. Catches `charlie_brown_at_domain.com`.
-  - `CUSTOMER_005`: Strict DOB parsing. Catches invalid date `31/02/1999`.
-  - `ACCOUNT_002`: Foreign key check `cust_id in valid_customer_ids`. Catches `A010` (referencing `C999`).
-  - `ACCOUNT_004`: Negative balance check on Savings/Checking. Catches `A004` (balance `-500.00`).
-  - `TXN_002`: Foreign key check `acct_id in valid_account_ids`. Catches orphan transaction `TXN-89231` (referencing `A999999`).
-  - `TXN_003`: Negative amount check `amount <= 0`. Catches `TXN-1008` (amount `-100.00`).
-  - `TXN_005`: Duplicate transaction ID check. Catches duplicate `TXN-1005`.
+  Implemented validation rules checking missing mandatory fields, duplicate natural keys, email regex matching, DOB strict date parsing, account type enumerations, negative balance checks, and foreign key sets.
 - **Verification Execution Output (`scripts/run_milestone_7.py`):**
-  ```text
-  --- VALIDATION RESULTS SUMMARY ---
-    • Entity 'Addresses': 5 original records -> 5 VALID passed.
-    • Entity 'Customers': 11 original records -> 7 VALID passed.
-    • Entity 'Accounts': 8 original records -> 6 VALID passed.
-    • Entity 'Transactions': 10 original records -> 7 VALID passed.
-    • Entity 'Loans': 2 original records -> 2 VALID passed.
-    • Entity 'Beneficiaries': 2 original records -> 2 VALID passed.
-
-  Total Exceptions Isolated: 9 (Matching all 9 seeded defects!)
-  ```
+  Isolated all 9 seeded data-quality defects with exact Rule IDs.
 
 ---
 
@@ -293,3 +265,91 @@
 - **Language / Runtime:** Python 3.14.5
 - **Validation Engine & Data Structures:** Pandas 3.0.5, Python Regex (`re`), Datetime (`datetime`)
 - **Configuration & Settings:** `migration_engine.config.settings`
+
+---
+
+## Milestone 8: Implement Data Transformation Engine
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **Transformation Engine (`migration_engine/transformation/transformer.py`):** Developed cleaning and mapping modules (`transform_customers`, `transform_accounts`, `transform_transactions`, `transform_all_entities`) applying Section 9 transformation specifications exclusively to valid records.
+- **String & Format Normalizer Functions:**
+  - `full_name`: Trimmed whitespace, collapsed multiple spaces, and converted to Title Case (`str.title()`).
+  - `phone_number`: Stripped non-numeric formatting characters (`+`, `-`, spaces) to yield clean 10-12 digit string (`normalize_phone`).
+  - `date_of_birth` / `opened_date` / `start_date`: Converted multi-format strings to ISO standard `YYYY-MM-DD` (`parse_iso_date`).
+  - `email`: Trimmed whitespace and converted to lowercase (`str.lower()`).
+  - `account_type` / `status` / `transaction_type`: Normalized to UPPERCASE (`SAVINGS`, `ACTIVE`, `DEPOSIT`).
+  - Monetary fields (`balance`, `amount`, `loan_amount`): Cast to 2-decimal place numeric values (`round(2)`).
+- **Milestone 8 Verification Runner:** Created [`scripts/run_milestone_8.py`](file:///Users/piyushisinghal/Downloads/BankMigrate/scripts/run_milestone_8.py) to execute extraction $\rightarrow$ validation $\rightarrow$ transformation and print transformed entity DataFrames.
+
+---
+
+### 2. Why It Was Built This Way
+- **Scope Restriction to Valid Records:** Transformation logic operates strictly on records that passed the validation engine (Milestone 7). Applying transformation logic after validation prevents wasting CPU cycles on invalid or duplicate records destined for the exception store.
+- **Standardized Target Schemas:** Output DataFrames produced by `transformer.py` match the target SQL schema column names and data types 1-to-1, ensuring seamless bulk inserts during loading (Milestone 9).
+
+---
+
+### 3. How It Was Built
+- **Transformation Algorithm Execution (`transformer.py`):**
+  - Example: `df["full_name"] = df["customer_name"].astype(str).str.strip().str.title()`
+  - Example: `df["phone_number"] = df["phone"].apply(normalize_phone)`
+  - Example: `df["email"] = df["email"].astype(str).str.strip().str.lower()`
+  - Example: `df["account_type"] = df["account_type"].astype(str).str.strip().str.upper()`
+- **Verification Execution Output (`scripts/run_milestone_8.py`):**
+  - Transformed 5 Addresses, 7 Customers, 6 Accounts, 7 Transactions, 2 Loans, 2 Beneficiaries.
+  - Confirmed `' john smith '` $\rightarrow$ `'John Smith'`, `'+91-98765-43210'` $\rightarrow$ `'919876543210'`, `'1985-05-15'` $\rightarrow$ `1985-05-15`.
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Language / Runtime:** Python 3.14.5
+- **Data Engineering:** Pandas 3.0.5
+- **Regex & Utilities:** Python `re`, `datetime`
+
+---
+
+## Milestone 9: Implement Target Database Bulk Loading Engine
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **Target Loader Module (`migration_engine/loading/loader.py`):** Built bulk insertion loader (`load_transformed_data`, `load_entity`) persisting clean, transformed DataFrames directly into `BankMigrate_Target` database using SQLAlchemy engine `to_sql`.
+- **Foreign Key Dependency Order Control:** Enforced strict relational loading sequence: `Addresses` $\rightarrow$ `Customers` $\rightarrow$ `Accounts` $\rightarrow$ `Transactions` $\rightarrow$ `Loans` $\rightarrow$ `Beneficiaries`.
+- **Target Table Truncation (`clear_target_tables`):** Added capability to clear target tables in reverse foreign key order (`Beneficiaries` $\rightarrow$ `Loans` $\rightarrow$ `Transactions` $\rightarrow$ `Accounts` $\rightarrow$ `Customers` $\rightarrow$ `Addresses`) before fresh pipeline execution.
+- **Milestone 9 Verification Runner:** Created [`scripts/run_milestone_9.py`](file:///Users/piyushisinghal/Downloads/BankMigrate/scripts/run_milestone_9.py) executing extraction $\rightarrow$ validation $\rightarrow$ transformation $\rightarrow$ target loading, followed by direct T-SQL row count verification queries against SQL Server.
+
+---
+
+### 2. Why It Was Built This Way
+- **Foreign Key Safe Execution:** Ordering target loads by entity dependencies prevents SQL Server foreign key violation errors (`FK__Customers__address_id`, `FK__Accounts__customer_id`, `FK__Transactions__account_id`).
+- **Transactional Bulk Appending:** Utilizing SQLAlchemy `to_sql(..., if_exists='append', index=False)` provides high-throughput batch insertion into target tables while respecting target database constraints.
+
+---
+
+### 3. How It Was Built
+- **Relational Loading Implementation (`loader.py`):**
+  Loops through `LOAD_ORDER` list, calling `df.to_sql(name=table_name, con=engine, if_exists="append", index=False)`.
+- **SQL Server Verification (`scripts/run_milestone_9.py`):**
+  Queried `BankMigrate_Target` via PyMSSQL cursor:
+  - `Addresses`: 5 rows loaded (✅ MATCH)
+  - `Customers`: 7 rows loaded (✅ MATCH)
+  - `Accounts`: 6 rows loaded (✅ MATCH)
+  - `Transactions`: 7 rows loaded (✅ MATCH)
+  - `Loans`: 2 rows loaded (✅ MATCH)
+  - `Beneficiaries`: 2 rows loaded (✅ MATCH)
+  - **Total:** 29 clean rows loaded into target database.
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Database Engine:** Microsoft SQL Server (Azure SQL Edge container `mcr.microsoft.com/azure-sql-edge:latest`)
+- **Language / Runtime:** Python 3.14.5
+- **ORM / DB Engine:** SQLAlchemy 2.0.52
+- **Database Driver:** PyMSSQL 2.3.13
+- **Data Engineering:** Pandas 3.0.5
