@@ -11,40 +11,40 @@ The system employs a dual-layer architecture combining high-performance Python d
 
 ```mermaid
 graph TD
-    subgraph Source Layer
-        LegacyDB[BankMigrate_Legacy Database]
+    subgraph Source_Layer ["Source Layer"]
+        LegacyDB["BankMigrate_Legacy Database"]
     end
 
-    subgraph Core Processing Engine (Python)
-        Ext[Extractor Module]
-        Prof[Profiler Module]
-        Val[Validator Module & Rule Catalog]
-        Trans[Transformer Module]
-        Load[Target Loader]
-        Recon[Reconciler Module]
-        Audit[Audit & Run Logger]
-        Exc[Exception Handler]
+    subgraph Core_Engine ["Core Processing Engine (Python)"]
+        Ext["Extractor Module"]
+        Prof["Profiler Module"]
+        Val["Validator Module & Rule Catalog"]
+        Trans["Transformer Module"]
+        Load["Target Loader"]
+        Recon["Reconciler Module"]
+        Audit["Audit & Run Logger"]
+        Exc["Exception Handler"]
     end
 
-    subgraph Database Layer (SQL Server)
-        TargetDB[BankMigrate_Target Database]
-        RunsTab[(MigrationRuns)]
-        ExTab[(MigrationExceptions)]
-        AuditTab[(MigrationAudit)]
-        SPs[T-SQL Stored Procedures]
+    subgraph DB_Layer ["Database Layer (SQL Server)"]
+        TargetDB["BankMigrate_Target Database"]
+        RunsTab["MigrationRuns Table"]
+        ExTab["MigrationExceptions Store"]
+        AuditTab["MigrationAudit Trail"]
+        SPs["T-SQL Stored Procedures"]
     end
 
-    subgraph Orchestration & Control Plane
-        API[ASP.NET Core REST API]
-        Sched[APScheduler Background Jobs]
+    subgraph Control_Layer ["Orchestration & Control Plane"]
+        API["ASP.NET Core REST API"]
+        Sched["APScheduler Background Jobs"]
     end
 
     LegacyDB --> Ext
     Ext --> Prof
     Prof --> Val
-    Val -- Rejected Records --> Exc
+    Val --> Exc
     Exc --> ExTab
-    Val -- Valid Records --> Trans
+    Val --> Trans
     Trans --> Load
     Load --> TargetDB
     Load --> AuditTab

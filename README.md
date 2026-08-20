@@ -1,8 +1,8 @@
 # BankMigrate — Enterprise Banking Data Migration Platform
 
-[![Build & Test Status](https://img.shields.io/badge/Pytest-100%25%20Passing-brightgreen)](file:///Users/piyushisinghal/Downloads/BankMigrate/tests)
-[![.NET Version](https://img.shields.io/badge/.NET-8.0%20Web%20API-blue)](file:///Users/piyushisinghal/Downloads/BankMigrate/api)
-[![SQL Server](https://img.shields.io/badge/Database-SQL%20Server%20%2F%20Azure%20SQL%20Edge-red)](file:///Users/piyushisinghal/Downloads/BankMigrate/scripts/sql)
+[![Build & Test Status](https://img.shields.io/badge/Pytest-100%25%20Passing-brightgreen)](tests/)
+[![.NET Version](https://img.shields.io/badge/.NET-8.0%20Web%20API-blue)](api/)
+[![SQL Server](https://img.shields.io/badge/Database-SQL%20Server%20%2F%20Azure%20SQL%20Edge-red)](scripts/sql/)
 
 BankMigrate is an enterprise-grade banking data migration platform designed to extract, profile, validate, transform, bulk-load, reconcile, and audit legacy banking data from an unconstrained source database (`BankMigrate_Legacy`) into a normalized, constraint-enforced target database (`BankMigrate_Target`).
 
@@ -12,40 +12,40 @@ BankMigrate is an enterprise-grade banking data migration platform designed to e
 
 ```mermaid
 graph TD
-    subgraph Source Layer
-        LegacyDB[BankMigrate_Legacy Database<br/>6 Unconstrained Legacy Tables]
+    subgraph Source_Layer ["Source Layer"]
+        LegacyDB["BankMigrate_Legacy Database - 6 Unconstrained Legacy Tables"]
     end
 
-    subgraph Core Migration Engine (Python)
-        Ext[1. Extractor Module]
-        Prof[2. Profiler Module]
-        Val[3. Validator Module & Rule Catalog]
-        Trans[4. Transformer Module]
-        Load[5. Target Bulk Loader]
-        Recon[6. Reconciliation Engine]
-        Audit[7. Audit & Run Logger]
-        Exc[8. Exception Handler]
+    subgraph Core_Engine ["Core Migration Engine (Python)"]
+        Ext["1. Extractor Module"]
+        Prof["2. Profiler Module"]
+        Val["3. Validator Module & Rule Catalog"]
+        Trans["4. Transformer Module"]
+        Load["5. Target Bulk Loader"]
+        Recon["6. Reconciliation Engine"]
+        Audit["7. Audit & Run Logger"]
+        Exc["8. Exception Handler"]
     end
 
-    subgraph Destination & Operations Layer (SQL Server)
-        TargetDB[BankMigrate_Target Database]
-        RunsTab[(MigrationRuns Table)]
-        ExTab[(MigrationExceptions Store)]
-        AuditTab[(MigrationAudit Trail)]
-        SPs[T-SQL Stored Procedures]
+    subgraph DB_Layer ["Destination & Operations Layer (SQL Server)"]
+        TargetDB["BankMigrate_Target Database"]
+        RunsTab["MigrationRuns Table"]
+        ExTab["MigrationExceptions Store"]
+        AuditTab["MigrationAudit Trail"]
+        SPs["T-SQL Stored Procedures"]
     end
 
-    subgraph Control & Orchestration Layer
-        API[ASP.NET Core REST API Controller]
-        Sched[APScheduler Background Worker]
+    subgraph Control_Layer ["Control & Orchestration Layer"]
+        API["ASP.NET Core REST API Controller"]
+        Sched["APScheduler Background Worker"]
     end
 
     LegacyDB --> Ext
     Ext --> Prof
     Prof --> Val
-    Val -- Isolated Defects --> Exc
+    Val --> Exc
     Exc --> ExTab
-    Val -- Valid Records --> Trans
+    Val --> Trans
     Trans --> Load
     Load --> TargetDB
     Load --> AuditTab
@@ -68,54 +68,54 @@ Unconstrained, non-normalized legacy banking tables with `NVARCHAR` types and de
 ```mermaid
 erDiagram
     Customers_Legacy {
-        NVARCHAR customer_id
-        NVARCHAR customer_name
-        NVARCHAR dob
-        NVARCHAR phone
-        NVARCHAR email
-        NVARCHAR street
-        NVARCHAR city
-        NVARCHAR state
-        NVARCHAR zip
+        string customer_id
+        string customer_name
+        string dob
+        string phone
+        string email
+        string street
+        string city
+        string state
+        string zip
     }
     Accounts_Legacy {
-        NVARCHAR account_id
-        NVARCHAR customer_id
-        NVARCHAR account_type
-        NVARCHAR balance
-        NVARCHAR open_date
-        NVARCHAR status
+        string account_id
+        string customer_id
+        string account_type
+        string balance
+        string open_date
+        string status
     }
     Transactions_Legacy {
-        NVARCHAR transaction_id
-        NVARCHAR account_id
-        NVARCHAR txn_type
-        NVARCHAR amount
-        NVARCHAR txn_date
-        NVARCHAR remarks
+        string transaction_id
+        string account_id
+        string txn_type
+        string amount
+        string txn_date
+        string remarks
     }
     Loans_Legacy {
-        NVARCHAR loan_id
-        NVARCHAR account_id
-        NVARCHAR amount
-        NVARCHAR rate
-        NVARCHAR term
-        NVARCHAR start_date
+        string loan_id
+        string account_id
+        string amount
+        string rate
+        string term
+        string start_date
     }
     Beneficiaries_Legacy {
-        NVARCHAR beneficiary_id
-        NVARCHAR customer_id
-        NVARCHAR name
-        NVARCHAR account_no
-        NVARCHAR routing
+        string beneficiary_id
+        string customer_id
+        string name
+        string account_no
+        string routing
     }
     Addresses_Legacy {
-        NVARCHAR address_id
-        NVARCHAR street
-        NVARCHAR city
-        NVARCHAR state
-        NVARCHAR zip
-        NVARCHAR country
+        string address_id
+        string street
+        string city
+        string state
+        string zip
+        string country
     }
 ```
 
@@ -136,97 +136,97 @@ erDiagram
     MigrationRuns ||--o{ MigrationAudit : "tracks"
 
     Addresses {
-        VARCHAR_50 address_id PK
-        NVARCHAR_255 street_address
-        NVARCHAR_100 city
-        NVARCHAR_50 state
-        NVARCHAR_20 postal_code
-        NVARCHAR_50 country
-        DATETIME2 created_at
+        string address_id PK
+        string street_address
+        string city
+        string state
+        string postal_code
+        string country
+        datetime created_at
     }
 
     Customers {
-        VARCHAR_50 customer_id PK
-        NVARCHAR_100 full_name
-        DATE date_of_birth
-        VARCHAR_20 phone_number
-        VARCHAR_255 email
-        VARCHAR_50 address_id FK
-        DATETIME2 created_at
+        string customer_id PK
+        string full_name
+        date date_of_birth
+        string phone_number
+        string email
+        string address_id FK
+        datetime created_at
     }
 
     Accounts {
-        VARCHAR_50 account_id PK
-        VARCHAR_50 customer_id FK
-        VARCHAR_20 account_type
-        DECIMAL_18_2 balance
-        DATE opened_date
-        VARCHAR_20 status
-        DATETIME2 created_at
+        string account_id PK
+        string customer_id FK
+        string account_type
+        decimal balance
+        date opened_date
+        string status
+        datetime created_at
     }
 
     Transactions {
-        VARCHAR_50 transaction_id PK
-        VARCHAR_50 account_id FK
-        VARCHAR_20 transaction_type
-        DECIMAL_18_2 amount
-        DATETIME2 transaction_date
-        NVARCHAR_255 description
-        DATETIME2 created_at
+        string transaction_id PK
+        string account_id FK
+        string transaction_type
+        decimal amount
+        datetime transaction_date
+        string description
+        datetime created_at
     }
 
     Loans {
-        VARCHAR_50 loan_id PK
-        VARCHAR_50 account_id FK
-        DECIMAL_18_2 loan_amount
-        DECIMAL_5_2 interest_rate
-        INT term_months
-        DATE start_date
-        DATETIME2 created_at
+        string loan_id PK
+        string account_id FK
+        decimal loan_amount
+        decimal interest_rate
+        int term_months
+        date start_date
+        datetime created_at
     }
 
     Beneficiaries {
-        VARCHAR_50 beneficiary_id PK
-        VARCHAR_50 customer_id FK
-        NVARCHAR_100 beneficiary_name
-        VARCHAR_50 account_number
-        VARCHAR_50 routing_code
-        DATETIME2 created_at
+        string beneficiary_id PK
+        string customer_id FK
+        string beneficiary_name
+        string account_number
+        string routing_code
+        datetime created_at
     }
 
     MigrationRuns {
-        VARCHAR_50 run_id PK
-        DATETIME2 started_at
-        DATETIME2 completed_at
-        INT source_records
-        INT validated_records
-        INT transformed_records
-        INT loaded_records
-        INT rejected_records
-        VARCHAR_50 status
+        string run_id PK
+        datetime started_at
+        datetime completed_at
+        int source_records
+        int validated_records
+        int transformed_records
+        int loaded_records
+        int rejected_records
+        string status
     }
 
     MigrationExceptions {
-        INT exception_id PK
-        VARCHAR_50 run_id FK
-        VARCHAR_50 entity_type
-        VARCHAR_50 record_id
-        VARCHAR_50 rule_id
-        VARCHAR_20 severity
-        NVARCHAR_MAX error_message
-        NVARCHAR_MAX source_data
-        DATETIME2 created_at
-        VARCHAR_20 status
+        int exception_id PK
+        string run_id FK
+        string entity_type
+        string record_id
+        string rule_id
+        string severity
+        string error_message
+        string source_data
+        datetime created_at
+        string status
     }
 
     MigrationAudit {
-        INT audit_id PK
-        VARCHAR_50 run_id FK
-        VARCHAR_50 entity
-        VARCHAR_50 record_id
-        VARCHAR_50 operation
-        DATETIME2 timestamp
-        VARCHAR_20 status
+        int audit_id PK
+        string run_id FK
+        string entity
+        string record_id
+        string operation
+        datetime timestamp
+        string status
     }
 ```
 
