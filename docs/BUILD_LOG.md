@@ -171,16 +171,7 @@
 ---
 
 ### 1. What Was Built
-- **Modular Package Architecture:** Architected and created the complete `migration_engine/` Python package structured into 9 decoupled submodules:
-  1. `migration_engine/config/`: Environment configuration & SQLAlchemy / PyMSSQL connection factories.
-  2. `migration_engine/extraction/`: Legacy database extraction engine reading SQL tables into Pandas DataFrames.
-  3. `migration_engine/profiling/`: Data profiler calculating total row counts, null counts, and duplicate counts.
-  4. `migration_engine/validation/`: Validation rule catalog (`rules.py`) and validator engine (`validator.py`).
-  5. `migration_engine/transformation/`: Cleaning engine applying Title Case, phone digit normalization, and ISO date formatting (`transformer.py`).
-  6. `migration_engine/exceptions/`: Exception store handler writing rejected records to `MigrationExceptions` (`handler.py`).
-  7. `migration_engine/loading/`: Bulk target loader inserting DataFrames into `BankMigrate_Target` in foreign key order (`loader.py`).
-  8. `migration_engine/reconciliation/`: Mathematical reconciler checking count and monetary balance (`reconciler.py`).
-  9. `migration_engine/audit/`: Audit logger recording operational events in `MigrationAudit` and tracking run states in `MigrationRuns` (`logger.py`).
+- **Modular Package Architecture:** Architected and created the complete `migration_engine/` Python package structured into 9 decoupled submodules.
 - **Pipeline Orchestrator:** Developed `migration_engine/pipeline.py` implementing `run_pipeline(run_id)` executing the linear pipeline sequence: `extract()` $\rightarrow$ `profile()` $\rightarrow$ `validate()` $\rightarrow$ `transform()` $\rightarrow$ `load()` $\rightarrow$ `reconcile()` $\rightarrow$ `report()`.
 - **Skeleton Import Test Suite:** Created `scripts/test_engine_skeleton.py` to verify independent importability and execution of all 9 submodules.
 
@@ -189,21 +180,12 @@
 ### 2. Why It Was Built This Way
 - **Package Decoupling over Script Monoliths:** Building a structured Python package (`migration_engine/`) rather than a single monolithic script guarantees that each phase of the migration pipeline operates as an independently callable, testable unit.
 - **Strict Linear Pipeline Execution:** Orchestrating pipeline execution through `pipeline.py` ensures that extraction occurs before validation, validation isolates invalid records before transformation, and loading occurs only for valid records.
-- **Independent Module Callability:** Each module (e.g. `validator.py` or `reconciler.py`) exposes pure functions that take DataFrames or data dictionaries, allowing unit tests in Milestone 19 to mock database connections and test logic in isolation.
 
 ---
 
 ### 3. How It Was Built
 - **Module Structure (`migration_engine/`):**
-  - `config/settings.py`: Implemented `get_legacy_connection()`, `get_target_connection()`, `get_legacy_engine()`, `get_target_engine()` using PyMSSQL and SQLAlchemy.
-  - `extraction/extractor.py`: Implemented `extract_legacy_data()` returning `dict[str, pd.DataFrame]`.
-  - `profiling/profiler.py`: Implemented `profile_all_tables()` calculating row/null/duplicate statistics.
-  - `validation/validator.py`: Implemented rule-checking functions (`validate_customers`, `validate_accounts`, `validate_transactions`).
-  - `transformation/transformer.py`: Implemented normalization functions (`transform_customers`, `transform_accounts`, `transform_transactions`).
-  - `loading/loader.py`: Implemented `load_transformed_data()` appending to SQL Server target tables via `to_sql`.
-  - `reconciliation/reconciler.py`: Implemented `reconcile_run()` verifying $\text{Source} = \text{Valid} + \text{Rejected}$.
-  - `exceptions/handler.py`: Implemented `record_exceptions()` writing parameterized inserts to `MigrationExceptions`.
-  - `audit/logger.py`: Implemented `create_migration_run()`, `update_migration_run()`, and `log_audit_event()`.
+  Implemented submodules in `config/`, `extraction/`, `profiling/`, `validation/`, `transformation/`, `loading/`, `reconciliation/`, `exceptions/`, and `audit/`.
 - **Verification Execution (`scripts/test_engine_skeleton.py`):**
   Ran import test suite validating all 9 package submodules. Result: `All 9 submodules imported successfully!`.
 
@@ -215,3 +197,99 @@
 - **ORM / DB Toolkit:** SQLAlchemy 2.0.52
 - **Database Connectivity:** PyMSSQL 2.3.13
 - **Configuration Management:** `python-dotenv` 1.2.3 reading `.env`
+
+---
+
+## Milestone 6: Implement Data Extraction & Profiling Modules
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **Extraction Engine (`migration_engine/extraction/extractor.py`):** Implemented `extract_legacy_data()` and `extract_table(table_name)` functions connecting to `BankMigrate_Legacy` via SQLAlchemy and reading SQL tables into in-memory Pandas DataFrames.
+- **Data Profiler (`migration_engine/profiling/profiler.py`):** Implemented `profile_all_tables()` and `profile_dataframe()` computing total row counts, column-level null counts (`df.isnull().sum()`), and duplicate row counts (`df.duplicated().sum()`) per legacy entity.
+- **Milestone 6 Verification Runner:** Created [`scripts/run_milestone_6.py`](file:///Users/piyushisinghal/Downloads/BankMigrate/scripts/run_milestone_6.py) to extract and profile all 6 legacy tables.
+
+---
+
+### 2. Why It Was Built This Way
+- **DataFrame In-Memory Processing:** Reading legacy tables into Pandas DataFrames provides vectorised, high-speed data manipulation, allowing memory-efficient null inspection and duplicate detection before validation or loading.
+- **Proactive Anomaly Profiling:** Generating profiling metrics immediately after extraction provides operational visibility into data quality defects prior to validation enforcement.
+
+---
+
+### 3. How It Was Built
+- **Extraction Mechanism:**
+  ```python
+  def extract_table(table_name: str) -> pd.DataFrame:
+      engine = get_legacy_engine()
+      return pd.read_sql(f"SELECT * FROM {table_name};", con=engine)
+  ```
+- **Profiling Metrics Computation:**
+  Calculates `total_rows`, `null_counts = df.isnull().sum().to_dict()`, and `duplicate_rows = int(df.duplicated().sum())`.
+- **Verification Output (`scripts/run_milestone_6.py`):**
+  - Extracted 6 tables total.
+  - `Customers_Legacy`: 11 total rows, 1 null `customer_id` detected.
+  - `Transactions_Legacy`: 10 total rows, 1 duplicate row detected (`TXN-1005`).
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Language / Runtime:** Python 3.14.5
+- **Data Manipulation:** Pandas 3.0.5
+- **DB Connector:** SQLAlchemy 2.0.52 + PyMSSQL 2.3.13
+
+---
+
+## Milestone 7: Implement Validation Engine & Rule Catalog Enforcement
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **Validation Engine (`migration_engine/validation/validator.py`):** Built entity validation functions (`validate_customers`, `validate_accounts`, `validate_transactions`, `validate_all_entities`) enforcing the Section 11 rule catalog across all extracted DataFrames.
+- **Validation Rule Catalog (`migration_engine/validation/rules.py`):** Implemented stable Rule ID catalog mapping rule IDs (`CUSTOMER_001` through `CUSTOMER_005`, `ACCOUNT_001` through `ACCOUNT_004`, `TXN_001` through `TXN_005`) to error severity levels (`ERROR`, `WARNING`) and human-readable descriptions.
+- **Relational Dependency Order Validation:** Structured validation to validate parent entities (`Customers`) first, collecting valid customer IDs to enforce referential integrity checks on dependent entities (`Accounts`), and using valid account IDs for `Transactions` validation.
+- **Milestone 7 Verification Runner:** Created [`scripts/run_milestone_7.py`](file:///Users/piyushisinghal/Downloads/BankMigrate/scripts/run_milestone_7.py) to run extraction and validation against `BankMigrate_Legacy`.
+
+---
+
+### 2. Why It Was Built This Way
+- **Stable Rule Traceability:** Assigning immutable Rule IDs (e.g., `CUSTOMER_001`, `ACCOUNT_002`, `TXN_002`) to every failure condition guarantees that rejected records written to `MigrationExceptions` are audit-ready and reportable via REST APIs.
+- **Cascading Referential Integrity Checks:** Validating parent entities before dependent entities ensures that orphan records in child tables (e.g. account `A010` referencing nonexistent customer `C999`, or transaction `TXN-89231` referencing nonexistent account `A999999`) are caught by software validation before reaching SQL Server foreign key constraints.
+- **Data Preservation on Rejection:** When a record fails validation, the record is isolated into the exceptions list alongside a full JSON snapshot of `source_data`, ensuring zero silent data loss.
+
+---
+
+### 3. How It Was Built
+- **Rule Enforcement Logic (`validator.py`):**
+  - `CUSTOMER_001`: Checks `pd.isna(cust_id)`. Catches record `Jane Doe`.
+  - `CUSTOMER_002`: Checks natural key `(name.lower(), dob)` and duplicate ID. Catches duplicate record `C019`.
+  - `CUSTOMER_004`: Regex `^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$`. Catches `charlie_brown_at_domain.com`.
+  - `CUSTOMER_005`: Strict DOB parsing. Catches invalid date `31/02/1999`.
+  - `ACCOUNT_002`: Foreign key check `cust_id in valid_customer_ids`. Catches `A010` (referencing `C999`).
+  - `ACCOUNT_004`: Negative balance check on Savings/Checking. Catches `A004` (balance `-500.00`).
+  - `TXN_002`: Foreign key check `acct_id in valid_account_ids`. Catches orphan transaction `TXN-89231` (referencing `A999999`).
+  - `TXN_003`: Negative amount check `amount <= 0`. Catches `TXN-1008` (amount `-100.00`).
+  - `TXN_005`: Duplicate transaction ID check. Catches duplicate `TXN-1005`.
+- **Verification Execution Output (`scripts/run_milestone_7.py`):**
+  ```text
+  --- VALIDATION RESULTS SUMMARY ---
+    • Entity 'Addresses': 5 original records -> 5 VALID passed.
+    • Entity 'Customers': 11 original records -> 7 VALID passed.
+    • Entity 'Accounts': 8 original records -> 6 VALID passed.
+    • Entity 'Transactions': 10 original records -> 7 VALID passed.
+    • Entity 'Loans': 2 original records -> 2 VALID passed.
+    • Entity 'Beneficiaries': 2 original records -> 2 VALID passed.
+
+  Total Exceptions Isolated: 9 (Matching all 9 seeded defects!)
+  ```
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Language / Runtime:** Python 3.14.5
+- **Validation Engine & Data Structures:** Pandas 3.0.5, Python Regex (`re`), Datetime (`datetime`)
+- **Configuration & Settings:** `migration_engine.config.settings`
