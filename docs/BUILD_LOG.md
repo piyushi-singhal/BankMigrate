@@ -116,29 +116,9 @@
 
 ### 3. How It Was Built
 - **T-SQL DDL Scripting (`scripts/sql/03_create_target_schema.sql`):**
-  Constructed DDL with reverse-dependency `DROP TABLE` checks and explicit relational constraints:
-  ```sql
-  CREATE TABLE Customers (
-      customer_id NVARCHAR(50) NOT NULL PRIMARY KEY,
-      full_name NVARCHAR(200) NOT NULL,
-      date_of_birth DATE NOT NULL,
-      phone_number NVARCHAR(50) NOT NULL,
-      email NVARCHAR(200) NOT NULL,
-      address_id NVARCHAR(50) NULL FOREIGN KEY REFERENCES Addresses(address_id),
-      created_at DATETIME2 DEFAULT SYSDATETIME() NOT NULL
-  );
-  ```
+  Constructed DDL with reverse-dependency `DROP TABLE` checks and explicit relational constraints.
 - **Python Setup & Inspection (`scripts/create_target.py`):**
   Executed T-SQL batches against `BankMigrate_Target` using `pymssql`. Verified table existence using `INFORMATION_SCHEMA.TABLES` and inspected enforced foreign key definitions via `sys.foreign_keys`.
-- **Verification Output:**
-  Confirmed creation of all 9 target tables and 7 foreign key constraints:
-  - `Customers` $\rightarrow$ `Addresses`
-  - `Accounts` $\rightarrow$ `Customers`
-  - `Transactions` $\rightarrow$ `Accounts`
-  - `Loans` $\rightarrow$ `Accounts`
-  - `Beneficiaries` $\rightarrow$ `Customers`
-  - `MigrationExceptions` $\rightarrow$ `MigrationRuns`
-  - `MigrationAudit` $\rightarrow$ `MigrationRuns`
 
 ---
 
@@ -148,3 +128,42 @@
 - **SQL Scripting:** T-SQL (DDL, `sys.foreign_keys`, `sys.tables`, `INFORMATION_SCHEMA`)
 - **Language / Runtime:** Python 3.14.5
 - **Configuration Management:** `python-dotenv` 1.2.3 reading `.env`
+
+---
+
+## Milestone 4: Write Formal Data Mapping & Transformation Specification
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **Formal Data Mapping Catalog:** Expanded [`docs/data-mapping.md`](file:///Users/piyushisinghal/Downloads/BankMigrate/docs/data-mapping.md) into a comprehensive specification governing all 6 banking domain entities (`Customers`, `Accounts`, `Transactions`, `Loans`, `Beneficiaries`, `Addresses`).
+- **Entity & Infrastructure ER Diagrams:** Updated visual Mermaid Entity-Relationship (ER) diagrams for both `BankMigrate_Legacy` (6 unconstrained legacy tables) and `BankMigrate_Target` (9 clean target and operational tracking tables).
+- **Transformation Algorithm Definitions:** Documented exact field-by-field transformation rules, casing standards, date format parsers (`YYYY-MM-DD` ISO conversion), phone number regex normalizations, email validation regexes, and handling of legacy nulls and default values.
+
+---
+
+### 2. Why It Was Built This Way
+- **Architectural Traceability:** Formalizing the mapping document as a version-controlled Markdown asset under `docs/` guarantees that migration transformation code in subsequent milestones (Milestones 7 & 8) directly implements documented specifications rather than implicit assumptions.
+- **Declarative Cleaning Contracts:** Defining transformation algorithms prior to coding Python pipeline modules ensures predictable validation logic:
+  - Casing rules (Title Case for names, Uppercase for enumerations like `account_type` and `status`, Lowercase for emails).
+  - Phone normalization (stripping non-digits to produce standard 10-12 digit numbers).
+  - Multi-format date parsing (converting legacy string representations like `15/05/1985` or `1985-05-15` into standard SQL `DATE`).
+
+---
+
+### 3. How It Was Built
+- **Markdown Specification (`docs/data-mapping.md`):**
+  Formatted tables linking legacy column names $\rightarrow$ target column names $\rightarrow$ target SQL data types $\rightarrow$ transformation algorithms $\rightarrow$ input/output transformation examples:
+  - Example: Legacy `' john smith '` $\rightarrow$ Target `'John Smith'` (Title Case, trim spaces).
+  - Example: Legacy `'+91-98765-43210'` $\rightarrow$ Target `'9876543210'` (Phone digit normalization).
+  - Example: Legacy `'12/03/1999'` $\rightarrow$ Target `1999-03-12` (ISO date conversion).
+- **Mermaid Diagram Versioning:** Embedded renderable Mermaid `erDiagram` syntax for both legacy and target schemas, explicitly documenting intentional dirty foreign key references (e.g. `A999999` in `Transactions_Legacy`).
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Documentation Standard:** GitHub Flavored Markdown (GFM)
+- **Diagramming Engine:** Mermaid JS (`erDiagram`)
+- **Version Control:** Git version-controlled asset in `docs/data-mapping.md`
