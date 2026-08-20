@@ -62,16 +62,7 @@
 
 ### 2. Why It Was Built This Way
 - **Unconstrained Legacy Tables:** The legacy tables intentionally omit SQL `PRIMARY KEY` and `FOREIGN KEY` constraints (defining columns as `NVARCHAR` and `NULLable`). In real enterprise migrations, legacy databases often contain orphaned references, duplicate natural keys, and missing fields. Omitting strict engine constraints allows dirty data to exist in `BankMigrate_Legacy` so the Python migration and T-SQL validation engine can detect and isolate them.
-- **Documented, Deterministic Quality Defects:** Rather than generating random noise, data defects were seeded deterministically to match Section 7 of the specification:
-  - **Duplicate Customers (`CUSTOMER_002`):** `C001` ('john smith', '1985-05-15') vs `C019` ('JOHN SMITH', '1985-05-15').
-  - **Missing Mandatory Field (`CUSTOMER_001`):** Customer record with `customer_id = NULL` ('Jane Doe').
-  - **Invalid Email Format (`CUSTOMER_004`):** `C006` email set to `'charlie_brown_at_domain.com'`.
-  - **Invalid Date of Birth (`CUSTOMER_005`):** `C007` DOB set to unparseable string `'31/02/1999'`.
-  - **Invalid Negative Balance (`ACCOUNT_004`):** Savings Account `A004` balance set to `-500.00`.
-  - **Orphan Foreign Key (`ACCOUNT_002`):** Account `A010` referencing nonexistent customer `C999`.
-  - **Duplicate Transaction (`TXN_005`):** Transaction `TXN-1005` inserted twice identically.
-  - **Orphan Transaction Foreign Key (`TXN_002`):** Transaction `TXN-89231` referencing nonexistent account `A999999`.
-  - **Invalid Transaction Amount (`TXN_003`):** Transaction `TXN-1008` amount set to `-100.00`.
+- **Documented, Deterministic Quality Defects:** Rather than generating random noise, data defects were seeded deterministically to match Section 7 of the specification (`CUSTOMER_*`, `ACCOUNT_*`, `TXN_*`).
 
 ---
 
@@ -80,15 +71,6 @@
   Executed `DROP TABLE` conditional checks followed by `CREATE TABLE` scripts defining flexible columns. Populated tables using parameterized explicit column `INSERT INTO TableName (col1, col2, ...) VALUES (...)` statements.
 - **Python Execution & Verification (`scripts/seed_legacy.py` & `scripts/verify_legacy_defects.py`):**
   `seed_legacy.py` connects to `BankMigrate_Legacy` via `pymssql`, drops/re-creates tables, parses line-by-line inserts, and verifies row counts. `verify_legacy_defects.py` runs targeted `SELECT` queries for each defect rule (`CUSTOMER_*`, `ACCOUNT_*`, `TXN_*`) to output verification details.
-- **Verification Output:**
-  ```text
-  Table 'Addresses_Legacy': 5 total rows seeded.
-  Table 'Customers_Legacy': 11 total rows seeded.
-  Table 'Accounts_Legacy': 8 total rows seeded.
-  Table 'Beneficiaries_Legacy': 2 total rows seeded.
-  Table 'Loans_Legacy': 2 total rows seeded.
-  Table 'Transactions_Legacy': 10 total rows seeded.
-  ```
 
 ---
 
@@ -96,5 +78,73 @@
 - **Database Engine:** Microsoft SQL Server (Azure SQL Edge container `mcr.microsoft.com/azure-sql-edge:latest`)
 - **Database Driver:** `pymssql` 2.3.13
 - **SQL Scripting:** T-SQL (Table creation, `INFORMATION_SCHEMA`, aggregation queries)
+- **Language / Runtime:** Python 3.14.5
+- **Configuration Management:** `python-dotenv` 1.2.3 reading `.env`
+
+---
+
+## Milestone 3: Create Normalized Target Schema & Operational Tracking Tables
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **Normalized Target Banking Schema:** Created 6 clean entity tables in `BankMigrate_Target`:
+  1. `Addresses` (`address_id` PK, `street_address`, `city`, `state`, `postal_code`, `country`, `created_at`)
+  2. `Customers` (`customer_id` PK, `full_name`, `date_of_birth` DATE, `phone_number`, `email`, `address_id` FK, `created_at`)
+  3. `Accounts` (`account_id` PK, `customer_id` FK, `account_type`, `balance` DECIMAL(18,2), `opened_date` DATE, `status`, `created_at`)
+  4. `Transactions` (`transaction_id` PK, `account_id` FK, `transaction_type`, `amount` DECIMAL(18,2), `transaction_date` DATETIME2, `description`, `created_at`)
+  5. `Loans` (`loan_id` PK, `account_id` FK, `loan_amount` DECIMAL(18,2), `interest_rate` DECIMAL(5,2), `term_months`, `start_date` DATE, `created_at`)
+  6. `Beneficiaries` (`beneficiary_id` PK, `customer_id` FK, `beneficiary_name`, `account_number`, `routing_code`, `created_at`)
+- **Operational & Migration Infrastructure Tables:** Created 3 pipeline management tables in `BankMigrate_Target`:
+  7. `MigrationRuns` (`run_id` PK, `started_at`, `completed_at`, `source_records`, `validated_records`, `transformed_records`, `loaded_records`, `rejected_records`, `status`)
+  8. `MigrationExceptions` (`exception_id` IDENTITY PK, `run_id` FK, `entity_type`, `record_id`, `rule_id`, `severity`, `error_message`, `source_data`, `created_at`, `status`)
+  9. `MigrationAudit` (`audit_id` IDENTITY PK, `run_id` FK, `entity`, `record_id`, `operation`, `timestamp`, `status`)
+- **Automation & DDL Execution Scripts:** Created `scripts/sql/03_create_target_schema.sql` and `scripts/create_target.py` to execute batch creation and verify all 9 tables and foreign key constraints.
+
+---
+
+### 2. Why It Was Built This Way
+- **Strict Referential Integrity & Typing:** Unlike `BankMigrate_Legacy`, the target schema enforces strict relational constraints (`PRIMARY KEY`, `FOREIGN KEY`, `NOT NULL`) and explicit banking data types (`DATE`, `DATETIME2`, `DECIMAL(18,2)`). This ensures invalid legacy data cannot bypass the validation layer and corrupt the target system.
+- **Dedicated Operational Tracking Infrastructure:**
+  - `MigrationRuns`: Provides run-level visibility, tracking record counts at each stage (`source` $\rightarrow$ `validated` $\rightarrow$ `transformed` $\rightarrow$ `loaded` $\rightarrow$ `rejected`) and run states (`IN_PROGRESS`, `COMPLETED`, `COMPLETED_WITH_EXCEPTIONS`, `FAILED`, `PARTIAL_FAILURE`).
+  - `MigrationExceptions`: Acts as an exception store for isolated records, preserving a snapshot of offending raw JSON data alongside human-readable error messages and Rule IDs.
+  - `MigrationAudit`: Serves as an append-only audit trail logging every atomic DML operation (`INSERT`, `UPDATE`, `REJECT`) per record.
+
+---
+
+### 3. How It Was Built
+- **T-SQL DDL Scripting (`scripts/sql/03_create_target_schema.sql`):**
+  Constructed DDL with reverse-dependency `DROP TABLE` checks and explicit relational constraints:
+  ```sql
+  CREATE TABLE Customers (
+      customer_id NVARCHAR(50) NOT NULL PRIMARY KEY,
+      full_name NVARCHAR(200) NOT NULL,
+      date_of_birth DATE NOT NULL,
+      phone_number NVARCHAR(50) NOT NULL,
+      email NVARCHAR(200) NOT NULL,
+      address_id NVARCHAR(50) NULL FOREIGN KEY REFERENCES Addresses(address_id),
+      created_at DATETIME2 DEFAULT SYSDATETIME() NOT NULL
+  );
+  ```
+- **Python Setup & Inspection (`scripts/create_target.py`):**
+  Executed T-SQL batches against `BankMigrate_Target` using `pymssql`. Verified table existence using `INFORMATION_SCHEMA.TABLES` and inspected enforced foreign key definitions via `sys.foreign_keys`.
+- **Verification Output:**
+  Confirmed creation of all 9 target tables and 7 foreign key constraints:
+  - `Customers` $\rightarrow$ `Addresses`
+  - `Accounts` $\rightarrow$ `Customers`
+  - `Transactions` $\rightarrow$ `Accounts`
+  - `Loans` $\rightarrow$ `Accounts`
+  - `Beneficiaries` $\rightarrow$ `Customers`
+  - `MigrationExceptions` $\rightarrow$ `MigrationRuns`
+  - `MigrationAudit` $\rightarrow$ `MigrationRuns`
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Database Engine:** Microsoft SQL Server (Azure SQL Edge container `mcr.microsoft.com/azure-sql-edge:latest`)
+- **Database Driver:** `pymssql` 2.3.13
+- **SQL Scripting:** T-SQL (DDL, `sys.foreign_keys`, `sys.tables`, `INFORMATION_SCHEMA`)
 - **Language / Runtime:** Python 3.14.5
 - **Configuration Management:** `python-dotenv` 1.2.3 reading `.env`
