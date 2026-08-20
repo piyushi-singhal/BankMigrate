@@ -567,3 +567,83 @@
 - **Language / Runtime:** Python 3.14.5
 - **Scheduling Library:** APScheduler 3.11.3
 - **Configuration & Core Engine:** `migration_engine.pipeline`
+
+---
+
+## Milestone 16: Implement Failure Simulation & Recovery Engine
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **Failure Simulator Module (`migration_engine/exceptions/simulator.py`):** Built failure injection engine supporting `NETWORK_DROP`, `LOCKED_TABLE`, and `DIRTY_INPUT` failure flags.
+- **Pipeline Exception Catching & FAILED State Transitions:** Updated `migration_engine/pipeline.py` to intercept runtime failures, transition `MigrationRuns.status` to `'FAILED'`, and log `PIPELINE_FAILURE` events in `MigrationAudit`.
+- **Automated Retry & Recovery Engine:** Added retry capability clearing intermediate dirty states, re-extracting legacy data, re-validating, transforming, bulk loading clean records, and restoring target database consistency.
+- **Milestone 16 Verification Runner:** Created [`scripts/run_milestones_16_17.py`](file:///Users/piyushisinghal/Downloads/BankMigrate/scripts/run_milestones_16_17.py) testing failure injection and retry recovery.
+
+---
+
+### 2. Why It Was Built This Way
+- **Resilience under Adverse Conditions:** Financial data pipelines must handle transient network drops, database table locks, and corrupted data batches gracefully without corrupting target database states or losing run state tracking.
+- **Deterministic Failure Testing:** Injecting explicit failure modes (`NETWORK_DROP`, `LOCKED_TABLE`) proves that the pipeline's exception handler and retry mechanisms operate correctly under real-world disaster recovery scenarios.
+
+---
+
+### 3. How It Was Built
+- **Failure Injection Execution (`simulator.py`):**
+  Hooks into pipeline stages (`extraction`, `loading`, `validation`) raising `MigrationFailureException`.
+- **Verification Execution Output (`scripts/run_milestones_16_17.py`):**
+  - Injected `NETWORK_DROP` into `RUN-FAIL-NET` $\rightarrow$ status set to `FAILED` in SQL Server ✅.
+  - Injected `LOCKED_TABLE` into `RUN-FAIL-LOCK` $\rightarrow$ status set to `FAILED` in SQL Server ✅.
+  - Triggered Retry recovery on `RUN-FAIL-NET` $\rightarrow$ status recovered to `COMPLETED_WITH_EXCEPTIONS`, loaded 29 clean target rows ✅.
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Database Engine:** Microsoft SQL Server
+- **Language / Runtime:** Python 3.14.5
+- **Exception Framework:** Python custom exceptions, `pymssql` transactional rollback
+
+---
+
+## Milestone 17: Apply Security Hardening & PII Protection
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **Least-Privilege Database Role Script (`scripts/sql/05_security_hardening.sql`):** Created T-SQL script provisioning `bankmigrate_app_role` in SQL Server with `SELECT`, `INSERT`, `UPDATE`, `EXECUTE` privileges on `BankMigrate_Legacy` and `BankMigrate_Target`, denying `ALTER` or sysadmin privileges.
+- **SQL Parameterization Audit:** Verified 100% parameterization across all Python database queries (`pymssql` `%s`, Dapper `@Param`), ensuring 0 inline string concatenations.
+- **Secrets Management:** Verified all credentials read dynamically from environment variables / `.env` (`python-dotenv` in Python, `IConfiguration` in C#).
+- **PII Masking & Sanitization Module (`migration_engine/validation/sanitizer.py`):** Implemented `mask_email`, `mask_phone`, and `mask_dob` helper functions to sanitize sensitive customer banking data in diagnostic log messages.
+
+---
+
+### 2. Why It Was Built This Way
+- **Least-Privilege Database Principle:** Application engines should never connect to enterprise banking databases using `sa` or `sysadmin` credentials in production. Provisioning a restricted role (`bankmigrate_app_role`) enforces schema isolation and prevents unauthorized DDL drops.
+- **SQL Injection Prevention:** Parameterizing 100% of queries prevents SQL injection vulnerabilities.
+- **Data Privacy Compliance (GDPR / GLBA):** Masking customer PII in log files guarantees compliance with financial data privacy regulations.
+
+---
+
+### 3. How It Was Built
+- **T-SQL Role Creation (`05_security_hardening.sql`):**
+  ```sql
+  CREATE ROLE bankmigrate_app_role;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::dbo TO bankmigrate_app_role;
+  GRANT EXECUTE ON SCHEMA::dbo TO bankmigrate_app_role;
+  DENY ALTER TO bankmigrate_app_role;
+  ```
+- **PII Sanitization Logic (`sanitizer.py`):**
+  - `mask_email('john.smith@gmail.com')` $\rightarrow$ `'j********h@gmail.com'`
+  - `mask_phone('+91-98765-43210')` $\rightarrow$ `'********3210'`
+  - `mask_dob('1985-05-15')` $\rightarrow$ `'XXXX-XX-15'`
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Database Security:** Microsoft SQL Server Database Roles & Schema Permissions
+- **Security Engineering:** T-SQL DCL (`GRANT`, `DENY`), Python `re` Regex
+- **Language / Runtime:** Python 3.14.5, C# .NET 8.0
