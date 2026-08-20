@@ -365,23 +365,13 @@
 
 ### 2. Why It Was Built This Way
 - **Database-Native Set Processing:** Implementing validation and duplicate detection in T-SQL stored procedures demonstrates advanced database capabilities (CTEs, Window Functions, Temp Tables, `TRY...CATCH`, explicit `BEGIN TRAN / COMMIT / ROLLBACK` transactions).
-- **Dual Layer Architecture:** Demonstrates both Python application-level validation and SQL Server database-level stored procedure validation, simulating enterprise banking architectures where T-SQL procedures enforce data governance directly inside the database engine.
+- **Dual Layer Architecture:** Demonstrates both Python application-level validation and SQL Server database-level stored procedure validation.
 
 ---
 
 ### 3. How It Was Built
 - **T-SQL Scripting (`scripts/sql/04_create_stored_procedures.sql`):**
-  - Window Function Duplicate Detection:
-    ```sql
-    WITH CustomerDuplicates AS (
-        SELECT customer_id, customer_name, dob,
-               ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(customer_name)), dob ORDER BY customer_id) AS row_num
-        FROM BankMigrate_Legacy.dbo.Customers_Legacy
-        WHERE customer_id IS NOT NULL
-    )
-    SELECT * FROM CustomerDuplicates WHERE row_num > 1;
-    ```
-  - Temp Tables & JSON Formatting: Used `#CustExceptions` and `FOR JSON PATH, WITHOUT_ARRAY_WRAPPER` to snapshot offending rows into `MigrationExceptions.source_data`.
+  Implemented window-function duplicate detection, temp table exception staging, JSON string snapshotting, and transaction control.
 - **Deployment Verification (`scripts/create_stored_procedures.py`):**
   Queried `INFORMATION_SCHEMA.ROUTINES`: All 6 stored procedures verified as DEPLOYED.
 
@@ -403,29 +393,20 @@
 
 ### 1. What Was Built
 - **Exception Handler Module (`migration_engine/exceptions/handler.py`):** Developed `record_exceptions(run_id, exceptions_list)` and `get_run_exceptions(run_id)` connecting to `BankMigrate_Target`.
-- **Exception Store Persistence:** Writes every rejected record into `MigrationExceptions` table, persisting:
-  - `run_id`: Unique migration run identifier (e.g. `RUN-TEST-M10-M12`).
-  - `entity_type`: Affected entity (`Customer`, `Account`, `Transaction`).
-  - `record_id`: Natural record ID of offending row.
-  - `rule_id`: Failed Rule ID (`CUSTOMER_001`, `CUSTOMER_002`, `CUSTOMER_004`, `CUSTOMER_005`, `ACCOUNT_002`, `ACCOUNT_004`, `TXN_002`, `TXN_003`, `TXN_005`).
-  - `severity`: Severity classification (`ERROR`, `WARNING`).
-  - `error_message`: Human-readable explanation.
-  - `source_data`: Full JSON snapshot of the original offending legacy record.
-  - `status`: Initial exception status set to `'OPEN'`.
+- **Exception Store Persistence:** Writes every rejected record into `MigrationExceptions` table, persisting `run_id`, `entity_type`, `record_id`, `rule_id`, `severity`, `error_message`, `source_data`, and `status`.
 - **Milestone 11 Verification Runner:** Integrated into `scripts/run_milestones_10_11_12.py`.
 
 ---
 
 ### 2. Why It Was Built This Way
-- **Zero Silent Data Loss:** Isolating rejected records into a structured SQL exception store ensures that bad legacy data never silently disappears or crashes the pipeline. Operators can inspect `MigrationExceptions` via REST APIs to resolve or correct exceptions.
-- **Auditability & Traceability:** Preserving `source_data` as a JSON string inside `MigrationExceptions` provides an immutable audit trail of the original raw record as it existed in the legacy database at the moment of rejection.
+- **Zero Silent Data Loss:** Isolating rejected records into a structured SQL exception store ensures that bad legacy data never silently disappears.
+- **Auditability & Traceability:** Preserving `source_data` as a JSON string inside `MigrationExceptions` provides an immutable audit trail of the original raw record.
 
 ---
 
 ### 3. How It Was Built
 - **Parameterized SQL Persistence (`handler.py`):**
-  Uses PyMSSQL cursor executing parameterized bulk inserts:
-  `INSERT INTO MigrationExceptions (run_id, entity_type, record_id, rule_id, severity, error_message, source_data, status) VALUES (%s, %s, %s, %s, %s, %s, %s, 'OPEN')`
+  Uses PyMSSQL cursor executing parameterized bulk inserts into `MigrationExceptions`.
 - **Verification Execution Output (`scripts/run_milestones_10_11_12.py`):**
   Persisted and queried 9 exception records from SQL Server `MigrationExceptions` table for run `RUN-TEST-M10-M12`.
 
@@ -448,38 +429,141 @@
 ### 1. What Was Built
 - **Reconciliation Engine (`migration_engine/reconciliation/reconciler.py`):** Built `reconcile_run(run_id, summary_counts)` executing automated mathematical and database reconciliation checks for every migration run.
 - **Record Count Reconciliation Math:**
-  Verifies:
-  $$\text{Source Records} = \text{Validated Records} + \text{Rejected Records}$$
-  $$\text{Validated Records} = \text{Loaded Records}$$
-- **Monetary Amount Reconciliation:** Invokes T-SQL stored procedure `sp_reconcile_migration` in SQL Server to compute monetary balance across financial transaction tables:
-  $$\text{Source Transaction Amount} = \text{Target Transaction Amount} + \text{Rejected Transaction Amount}$$
-- **Structured Reconciliation Report:** Returns structured dictionary reporting count match boolean, monetary breakdown, and status (`BALANCED` or `DISCREPANCY_DETECTED`).
+  Verifies $\text{Source Records} = \text{Validated Records} + \text{Rejected Records}$ and $\text{Validated Records} = \text{Loaded Records}$.
+- **Monetary Amount Reconciliation:** Invokes T-SQL stored procedure `sp_reconcile_migration` in SQL Server to compute monetary balance across financial transaction tables: $\text{Source Transaction Amount} = \text{Target Transaction Amount} + \text{Rejected Transaction Amount}$.
 - **Milestone 12 Verification Runner:** Integrated into [`scripts/run_milestones_10_11_12.py`](file:///Users/piyushisinghal/Downloads/BankMigrate/scripts/run_milestones_10_11_12.py).
 
 ---
 
 ### 2. Why It Was Built This Way
 - **Automated Verification over Manual Spot-Checks:** Running automated mathematical reconciliation at the end of every migration run proves that no records or dollar amounts were lost or unaccounted for during processing.
-- **Financial Audit Rigor:** In banking data migrations, reconciling dollar amounts (Source Txn Sum = Target Txn Sum + Rejected Txn Sum) is mandatory to guarantee financial balance integrity across legacy and core banking systems.
+- **Financial Audit Rigor:** Reconciling dollar amounts (Source Txn Sum = Target Txn Sum + Rejected Txn Sum) is mandatory in banking to guarantee financial balance integrity.
 
 ---
 
 ### 3. How It Was Built
 - **Reconciliation Algorithm (`reconciler.py`):**
-  - Evaluates `count_match = (source == (valid + rejected)) and (valid == loaded)`.
-  - Calls `cursor.callproc("sp_reconcile_migration", (run_id,))`.
+  Evaluates count balance and calls `cursor.callproc("sp_reconcile_migration", (run_id,))`.
 - **Verification Execution Output (`scripts/run_milestones_10_11_12.py`):**
-  - Source Records: 38
-  - Validated Records: 29
-  - Rejected Records: 9
-  - Loaded Records: 29
-  - Count Math Check: $38 = 29 + 9 \rightarrow$ `True` ✅
-  - Reconciliation Status: `BALANCED` ✅
+  Verified $38 = 29 + 9 \rightarrow$ `BALANCED` ✅.
 
 ---
 
 ### 4. Tech Stack Used in This Step
-- **Database Engine:** Microsoft SQL Server (Azure SQL Edge container `mcr.microsoft.com/azure-sql-edge:latest`)
+- **Database Engine:** Microsoft SQL Server
 - **SQL Dialect:** T-SQL Stored Procedure `sp_reconcile_migration`
 - **Language / Runtime:** Python 3.14.5
 - **Database Driver:** PyMSSQL 2.3.13
+
+---
+
+## Milestone 13: Implement Migration Run Tracking & Audit Logging
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **Run Tracking Module (`migration_engine/audit/logger.py`):** Implemented `create_migration_run(run_id)` and `update_migration_run(run_id, counts, status)` creating and updating lifecycle tracking records in `MigrationRuns`.
+- **Audit Logging Module:** Implemented `log_audit_event()` and `log_audit_batch()` writing an append-only audit trail for every loaded (`INSERT`) and rejected (`REJECT`) record into `MigrationAudit`.
+- **Milestone 13 Verification Runner:** Created [`scripts/run_milestones_13_14_15.py`](file:///Users/piyushisinghal/Downloads/BankMigrate/scripts/run_milestones_13_14_15.py) to run the migration pipeline and verify audit entries directly in SQL Server.
+
+---
+
+### 2. Why It Was Built This Way
+- **Operational Visibility:** Wrapping every migration run inside `MigrationRuns` provides real-time state tracking (`IN_PROGRESS`, `COMPLETED`, `COMPLETED_WITH_EXCEPTIONS`) and stage-by-stage record counts.
+- **Append-Only Audit Trail:** Logging every atomic DML event into `MigrationAudit` provides complete compliance traceability required by financial auditors.
+
+---
+
+### 3. How It Was Built
+- **Lifecycle Tracking (`logger.py`):**
+  - `create_migration_run`: Idempotently inserts/resets `MigrationRuns` row with `status = 'IN_PROGRESS'`.
+  - `log_audit_batch`: Bulk inserts atomic operation rows into `MigrationAudit` (`INSERT` / `REJECT`).
+  - `update_migration_run`: Finalizes run metrics and sets completed timestamp and run status.
+- **Verification Output (`scripts/run_milestones_13_14_15.py`):**
+  Verified `MigrationRuns` record (`RUN-TEST-M13-M15`, status: `COMPLETED_WITH_EXCEPTIONS`) and 74 `MigrationAudit` entries in SQL Server.
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Database Engine:** Microsoft SQL Server
+- **Language / Runtime:** Python 3.14.5
+- **Database Driver:** PyMSSQL 2.3.13
+
+---
+
+## Milestone 14: Build ASP.NET Core REST API Layer
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **ASP.NET Core 8 Web API Project:** Built and compiled C# Web API project [`api/BankMigrate.Api.csproj`](file:///Users/piyushisinghal/Downloads/BankMigrate/api/BankMigrate.Api.csproj) providing RESTful orchestration and reporting endpoints.
+- **REST Controller (`api/Controllers/MigrationController.cs`):** Exposed all 6 required REST endpoints matching PDF Section 17:
+  1. `POST /api/migrations`: Starts a new migration run (triggers Python engine).
+  2. `GET /api/migrations`: Lists all past and current migration runs from `MigrationRuns`.
+  3. `GET /api/migrations/{runId}`: Gets detailed status and record counts for one run.
+  4. `GET /api/migrations/{runId}/exceptions`: Lists all rejected records for a run from `MigrationExceptions`.
+  5. `GET /api/migrations/{runId}/reconciliation`: Returns reconciliation report for a run (invoking `sp_reconcile_migration`).
+  6. `POST /api/migrations/{runId}/retry`: Retries a failed or partially completed run.
+- **Services & Models Layer (`api/Services/`, `api/Models/`):**
+  - `MigrationService.cs`: Triggers the Python pipeline process via `System.Diagnostics.Process`.
+  - `ReportingService.cs`: Queries `BankMigrate_Target` using Dapper and `Microsoft.Data.SqlClient`.
+  - `MigrationModels.cs`: DTO models (`MigrationRunDto`, `ExceptionDto`, `ReconciliationReportDto`).
+
+---
+
+### 2. Why It Was Built This Way
+- **Genuine API Orchestration & Reporting:** Decouples REST HTTP management from batch Python processing. The API acts as the administrative control plane, exposing run status, exceptions, and reconciliation reports without embedding heavy data processing inside web server threads.
+- **High-Performance SQL Querying with Dapper:** Uses Dapper micro-ORM for lightweight, high-speed execution of parameterized SQL queries against `MigrationRuns` and `MigrationExceptions`.
+
+---
+
+### 3. How It Was Built
+- **C# Controller & Service Architecture:**
+  Constructed `MigrationController` delegating orchestration to `IMigrationService` and database reporting to `IReportingService`.
+- **Build & Verification (`dotnet build`):**
+  Built `api/BankMigrate.Api.csproj` targeting .NET 8.0. Result: `Build succeeded. 0 Warning(s), 0 Error(s)`.
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Framework / Language:** .NET 8.0 C# (ASP.NET Core Web API)
+- **Data Access:** Dapper 2.1.79 + Microsoft.Data.SqlClient 7.0.2
+- **OpenAPI:** Swashbuckle / SwaggerGen
+
+---
+
+## Milestone 15: Add Automated Scheduler Engine
+**Date:** 2026-08-21  
+**Status:** COMPLETE  
+
+---
+
+### 1. What Was Built
+- **Automated Scheduler Package (`scheduler/migration_scheduler.py`):** Created `MigrationScheduler` module utilizing `APScheduler` (BackgroundScheduler) to execute recurring migration jobs on a cron-style interval.
+- **Scheduler Runner Script:** Built `scripts/start_scheduler.py` allowing operators to launch the background automated scheduler from CLI.
+- **Milestone 15 Verification Runner:** Integrated into [`scripts/run_milestones_13_14_15.py`](file:///Users/piyushisinghal/Downloads/BankMigrate/scripts/run_milestones_13_14_15.py) to trigger background scheduled migration execution.
+
+---
+
+### 2. Why It Was Built This Way
+- **Automated vs Manual Execution:** Real production banking migration platforms run on automated schedules (e.g. nightly batch windows at 02:00 AM) rather than requiring manual developer triggers every time.
+- **Robust Background Scheduling:** Utilizing `APScheduler` provides interval and cron triggers that execute `run_pipeline()` asynchronously, logging status and handling exceptions gracefully.
+
+---
+
+### 3. How It Was Built
+- **Scheduler Implementation (`migration_scheduler.py`):**
+  Uses `BackgroundScheduler.add_job` with `IntervalTrigger(minutes=interval_minutes)`.
+- **Verification Execution Output (`scripts/run_milestones_13_14_15.py`):**
+  Triggered automated scheduled run `SCHED-RUN-20260821-033922`. Verified completion status: `COMPLETED_WITH_EXCEPTIONS`.
+
+---
+
+### 4. Tech Stack Used in This Step
+- **Language / Runtime:** Python 3.14.5
+- **Scheduling Library:** APScheduler 3.11.3
+- **Configuration & Core Engine:** `migration_engine.pipeline`

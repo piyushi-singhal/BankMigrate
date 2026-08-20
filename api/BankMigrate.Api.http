@@ -1,0 +1,6 @@
+@BankMigrate.Api_HostAddress = http://localhost:5068
+
+GET {{BankMigrate.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

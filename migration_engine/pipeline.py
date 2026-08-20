@@ -1,5 +1,9 @@
 import datetime
-from migration_engine.audit.logger import create_migration_run, update_migration_run
+from migration_engine.audit.logger import (
+    create_migration_run,
+    update_migration_run,
+    log_audit_batch
+)
 from migration_engine.extraction.extractor import extract_legacy_data
 from migration_engine.profiling.profiler import profile_all_tables
 from migration_engine.validation.validator import validate_all_entities
@@ -8,10 +12,10 @@ from migration_engine.exceptions.handler import record_exceptions
 from migration_engine.loading.loader import load_transformed_data
 from migration_engine.reconciliation.reconciler import reconcile_run
 
-def run_pipeline(run_id: str = None) -> dict:
+def run_pipeline(run_id: str = None, clear_target: bool = True) -> dict:
     """
     Executes the full end-to-end BankMigrate migration pipeline:
-    extract -> profile -> validate -> transform -> load -> reconcile -> report
+    extract -> profile -> validate -> transform -> load -> reconcile -> report -> audit
     """
     if not run_id:
         timestamp_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -43,10 +47,14 @@ def run_pipeline(run_id: str = None) -> dict:
     rejected_count = len(exceptions)
     print(f"Validation finished: {validated_count} valid records, {rejected_count} exceptions isolated.")
 
-    # Step 4: Exception Handling
+    # Step 4: Exception Handling & Audit Rejections
     print("\nStage 4: Isolating rejected records into exception store...")
     recorded_exceptions_count = record_exceptions(run_id, exceptions)
     print(f"Recorded {recorded_exceptions_count} exception records into MigrationExceptions.")
+    
+    # Audit log rejected records
+    rejected_ids = [ex.get("record_id") for ex in exceptions if ex.get("record_id") is not None]
+    log_audit_batch(run_id, "MultiEntity", rejected_ids, "REJECT", "SUCCESS")
 
     # Step 5: Transformation
     print("\nStage 5: Transforming valid records to target schema...")
@@ -54,11 +62,32 @@ def run_pipeline(run_id: str = None) -> dict:
     transformed_count = sum(len(df) for df in transformed_data.values())
     print(f"Transformed {transformed_count} records to target specifications.")
 
-    # Step 6: Target Loading
+    # Step 6: Target Loading & Audit Inserts
     print("\nStage 6: Bulk loading transformed records to target database...")
-    load_counts = load_transformed_data(transformed_data)
+    load_counts = load_transformed_data(transformed_data, clear_first=clear_target)
     loaded_count = sum(load_counts.values())
     print(f"Successfully loaded {loaded_count} records into BankMigrate_Target.")
+
+    # Audit log inserted records per entity
+    for entity_name, df in transformed_data.items():
+        if not df.empty:
+            pk_col = f"{entity_name.lower()[:-1] if entity_name.endswith('s') else entity_name.lower()}_id"
+            if entity_name == "Addresses":
+                pk_col = "address_id"
+            elif entity_name == "Customers":
+                pk_col = "customer_id"
+            elif entity_name == "Accounts":
+                pk_col = "account_id"
+            elif entity_name == "Transactions":
+                pk_col = "transaction_id"
+            elif entity_name == "Loans":
+                pk_col = "loan_id"
+            elif entity_name == "Beneficiaries":
+                pk_col = "beneficiary_id"
+
+            if pk_col in df.columns:
+                rec_ids = df[pk_col].dropna().tolist()
+                log_audit_batch(run_id, entity_name, rec_ids, "INSERT", "SUCCESS")
 
     # Step 7: Reconciliation
     print("\nStage 7: Executing reconciliation...")
